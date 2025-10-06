@@ -170,7 +170,9 @@ st.markdown(
 # 4) Comportamento de mercado
 st.markdown("---")
 st.markdown("### 🔍 4. Pensando em comportamento de mercado")
-st.code("Preço ↓↓↓↓↓\nSMA20 → uma linha que ficou lá em cima\nRSI ↓ até 30")
+st.code("""Preço ↓↓↓↓↓
+SMA20 → uma linha que ficou lá em cima
+RSI ↓ até 30""")
 st.markdown(
     "Isso mostra que:
 "
