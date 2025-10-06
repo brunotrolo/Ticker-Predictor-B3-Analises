@@ -12,7 +12,6 @@ st.set_page_config(page_title="Análise B3 Didática", page_icon="📊", layout=
 def fetch_data(ticker, start, end):
     df = yf.download(ensure_sa_suffix(ticker), start=start, end=end, auto_adjust=True, progress=False)
     if df.empty: return df
-    # Flatten MultiIndex if needed (some yfinance versions)
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
     for c in ["Open","High","Low","Close","Volume"]:
@@ -116,14 +115,11 @@ st.markdown("### 🪜 1. Entendendo a SMA20 — “a linha da média”")
 st.markdown(
     "A **SMA20** é como a média dos **últimos 20 preços de fechamento** — a linha de equilíbrio que mostra a **direção geral do preço**."
 )
-st.markdown(
-    "- 📈 Se o preço está **acima** da linha, há **força** (tendência de alta).
-"
-    "- 📉 Se está **abaixo**, há **fraqueza** (tendência de queda)."
-)
-st.markdown(
-    f"👉 No caso de **{ticker}**, o preço atual é **R$ {price:,.2f}**, cerca de **{delta20:+.2f}%** em relação à média dos últimos 20 dias."
-)
+st.markdown("""
+- 📈 Se o preço está **acima** da linha, há **força** (tendência de alta).
+- 📉 Se está **abaixo**, há **fraqueza** (tendência de queda).
+""")
+st.markdown(f"👉 No caso de **{ticker}**, o preço atual é **R$ {price:,.2f}**, cerca de **{delta20:+.2f}%** em relação à média dos últimos 20 dias.")
 if delta20 < -5:
     st.markdown("🔴 **A ação vem caindo há várias semanas e o mercado está mais pessimista no curto prazo.**")
 elif -5 <= delta20 <= 5:
@@ -136,15 +132,15 @@ st.markdown("📉 É como se o preço pudesse ficar **“afastado da linha”** 
 # 2) RSI – o termômetro da força
 st.markdown("---")
 st.markdown("### ⚖️ 2. Entendendo o RSI(14) — “o termômetro da força”")
-st.markdown(
-    "Pense no **RSI** como um **termômetro de energia do mercado**. Vai de **0 a 100** e mostra quem está dominando: **compradores** ou **vendedores**."
-)
+st.markdown("Pense no **RSI** como um **termômetro de energia do mercado**. Vai de **0 a 100** e mostra quem está dominando: **compradores** ou **vendedores**.")
 st.table(pd.DataFrame({
     "Faixa":[ "70 a 100", "50", "0 a 30" ],
     "Situação":[ "Sobrecompra", "Neutro", "Sobrevenda" ],
-    "O que significa":[ "Subiu rápido demais — pode corrigir pra baixo.",
-                        "Equilíbrio entre compra e venda.",
-                        "Caiu rápido demais — pode reagir pra cima." ]
+    "O que significa":[
+        "Subiu rápido demais — pode corrigir pra baixo.",
+        "Equilíbrio entre compra e venda.",
+        "Caiu rápido demais — pode reagir pra cima."
+    ]
 }))
 st.markdown(f"No caso de **{ticker}**, o RSI(14) está em **{rsi_val:.1f}**.")
 if rsi_val < 30:
@@ -157,15 +153,12 @@ else:
 # 3) Juntando tudo
 st.markdown("---")
 st.markdown("### 🧩 3. Juntando as duas informações")
-st.markdown(
-    "Quando o **preço está bem abaixo da SMA20** e o **RSI está perto de 30**, é como se o mercado dissesse:
+st.markdown("""Quando o **preço está bem abaixo da SMA20** e o **RSI está perto de 30**, é como se o mercado dissesse:
 
-"
-    "🗣️ “Essa ação caiu bastante, está cansada de cair e pode dar um respiro em breve.”
+🗣️ “Essa ação caiu bastante, está cansada de cair e pode dar um respiro em breve.”
 
-"
-    "Mas lembre: isso **não garante** que vai subir agora. É só um **sinal de que a pressão de venda está diminuindo**."
-)
+Mas lembre: isso **não garante** que vai subir agora. É só um **sinal de que a pressão de venda está diminuindo**.
+""")
 
 # 4) Comportamento de mercado
 st.markdown("---")
@@ -173,18 +166,13 @@ st.markdown("### 🔍 4. Pensando em comportamento de mercado")
 st.code("""Preço ↓↓↓↓↓
 SMA20 → uma linha que ficou lá em cima
 RSI ↓ até 30""")
-st.markdown(
-    "Isso mostra que:
-"
-    "- A **queda foi rápida**;
-"
-    "- O **preço ficou longe da média**;
-"
-    "- E o **RSI sinaliza vendedores perdendo força**.
+st.markdown("""Isso mostra que:
+- A **queda foi rápida**;
+- O **preço ficou longe da média**;
+- E o **RSI sinaliza vendedores perdendo força**.
 
-"
-    "💡 É o que muitos chamam de **“ponto de atenção”**: se aparecer **volume de compra** nos próximos dias e o preço começar a subir, → pode ser um **repique** (subida temporária após muita queda)."
-)
+💡 É o que muitos chamam de **“ponto de atenção”**: se aparecer **volume de compra** nos próximos dias e o preço começar a subir, → pode ser um **repique** (subida temporária após muita queda).
+""")
 
 # 5) Resumo final
 st.markdown("---")
