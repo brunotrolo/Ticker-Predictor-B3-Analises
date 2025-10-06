@@ -1,203 +1,180 @@
 
-import os
+import streamlit as st
+import pandas as pd, numpy as np
 from datetime import date, timedelta
-import pandas as pd
-import numpy as np
 import yfinance as yf
 import plotly.graph_objects as go
-import streamlit as st
-
 from b3_utils import load_b3_tickers, ensure_sa_suffix, is_known_b3_ticker, search_b3
 
-st.set_page_config(page_title="B3 Ticker App", page_icon="📈", layout="wide")
+st.set_page_config(page_title="Análise B3 Didática", page_icon="📊", layout="wide")
 
-def _collapse_duplicate_cols(df: pd.DataFrame) -> pd.DataFrame:
-    out = df.copy()
-    if isinstance(out.columns, pd.MultiIndex):
-        lvl0 = set(out.columns.get_level_values(0))
-        lvl1 = set(out.columns.get_level_values(1))
-        if {'Open','High','Low','Close','Volume'}.issubset(lvl0):
-            out.columns = out.columns.get_level_values(0)
-        elif {'Open','High','Low','Close','Volume'}.issubset(lvl1):
-            out.columns = out.columns.get_level_values(1)
-        else:
-            out.columns = ['_'.join([str(x) for x in tup if x!='']).strip('_') for tup in out.columns.to_list()]
-    if out.columns.duplicated().any():
-        new_cols = {}
-        for col in out.columns.unique():
-            same = out.loc[:, out.columns == col]
-            if hasattr(same, "shape") and same.shape[1] > 1:
-                s = same.apply(pd.to_numeric, errors='coerce').bfill(axis=1).iloc[:, 0]
-                new_cols[col] = s
-            else:
-                new_cols[col] = out[col]
-        out = pd.DataFrame(new_cols, index=out.index)
-    return out
-
-@st.cache_data(show_spinner=False, ttl=3600)
-def fetch_history(ticker: str, start: date, end: date) -> pd.DataFrame:
-    t = ensure_sa_suffix(ticker)
-    df = yf.download(t, start=start, end=end, progress=False, auto_adjust=True)
-    if df is None or len(df) == 0:
-        return pd.DataFrame()
-    df = _collapse_duplicate_cols(df)
-    df = df.rename_axis("Date").reset_index()
-    for col in ["Open","High","Low","Close","Volume"]:
-        if col in df.columns:
-            val = df[col]
-            if isinstance(val, pd.DataFrame):
-                s = val.apply(pd.to_numeric, errors="coerce").bfill(axis=1).iloc[:,0]
-                df[col] = s
-            else:
-                df[col] = pd.to_numeric(val, errors="coerce")
-    df = df.dropna(subset=["Close"]).reset_index(drop=True)
+@st.cache_data(ttl=3600)
+def fetch_data(ticker, start, end):
+    df = yf.download(ensure_sa_suffix(ticker), start=start, end=end, auto_adjust=True, progress=False)
+    if df.empty: return df
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    for c in ["Open","High","Low","Close","Volume"]:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+    df = df.dropna(subset=["Close"]).reset_index()
     return df
 
-def sma(series: pd.Series, window: int) -> pd.Series:
-    return series.rolling(window=window, min_periods=window).mean()
+def sma(s, w): return s.rolling(window=w, min_periods=w).mean()
+def rsi(s, w=14):
+    delta = s.diff()
+    up = delta.clip(lower=0)
+    down = -delta.clip(upper=0)
+    ma_up = up.rolling(w).mean()
+    ma_down = down.rolling(w).mean()
+    rs = ma_up / ma_down.replace(0, np.nan)
+    return 100 - (100 / (1 + rs))
 
-def ema(series: pd.Series, span: int) -> pd.Series:
-    return series.ewm(span=span, adjust=False, min_periods=span).mean()
+def add_indicators(df):
+    if df.empty: return df
+    df = df.copy()
+    df["SMA20"]=sma(df["Close"],20)
+    df["RSI14"]=rsi(df["Close"])
+    return df
 
-def rsi(series: pd.Series, window: int = 14) -> pd.Series:
-    delta = series.diff()
-    gain = (delta.clip(lower=0)).rolling(window=window, min_periods=window).mean()
-    loss = (-delta.clip(upper=0)).rolling(window=window, min_periods=window).mean()
-    rs = gain / loss.replace(0, np.nan)
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
-
-def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty:
-        return df
-    out = df.copy()
-    close = out["Close"].astype(float)
-    out["SMA20"] = sma(close, 20)
-    out["SMA50"] = sma(close, 50)
-    out["SMA200"] = sma(close, 200)
-    out["EMA20"] = ema(close, 20)
-    out["RSI14"] = rsi(close, 14)
-    return out
-
-def price_chart(df: pd.DataFrame, title: str):
+def plot_price(df, t):
     fig = go.Figure()
-    fig.add_trace(go.Candlestick(
-        x=df["Date"], open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"], name="Preço"
-    ))
-    for col, nm in [("SMA20","SMA 20"), ("SMA50","SMA 50"), ("SMA200","SMA 200")]:
-        if col in df.columns:
-            fig.add_trace(go.Scatter(x=df["Date"], y=df[col], name=nm))
-    fig.update_layout(title=title, xaxis_title="Data", yaxis_title="Preço (BRL)", height=600)
+    fig.add_trace(go.Candlestick(x=df["Date"], open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"], name="Preço"))
+    fig.add_trace(go.Scatter(x=df["Date"], y=df["SMA20"], name="SMA20"))
+    fig.update_layout(title=f"{t} - Preço e SMA20", xaxis_title="Data", yaxis_title="Preço (R$)")
     st.plotly_chart(fig, use_container_width=True)
 
-def rsi_chart(df: pd.DataFrame, title: str):
+def plot_rsi(df, t):
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df["Date"], y=df["RSI14"], name="RSI 14"))
+    fig.add_trace(go.Scatter(x=df["Date"], y=df["RSI14"], name="RSI(14)"))
     fig.add_hline(y=70, line_dash="dash")
     fig.add_hline(y=30, line_dash="dash")
-    fig.update_layout(title=title, xaxis_title="Data", yaxis_title="RSI", height=250)
+    fig.update_layout(title=f"{t} - RSI(14)", xaxis_title="Data", yaxis_title="RSI")
     st.plotly_chart(fig, use_container_width=True)
 
-# Sidebar – choose ticker (B3 only)
-st.sidebar.header("⚙️ Configurações")
 b3 = load_b3_tickers()
-q = st.sidebar.text_input("Buscar empresa ou ticker (ex.: PETR4, VALE3)", value="")
-res = search_b3(q, limit=50) if q else b3.head(50)
-choice = st.sidebar.selectbox("Selecione o ticker (B3)", options=res["ticker"].tolist(), format_func=lambda t: f"{t} — {b3.loc[b3['ticker']==t,'name'].values[0]}")
+st.sidebar.header("⚙️ Configurações")
+q = st.sidebar.text_input("Buscar empresa ou ticker", "")
+res = search_b3(q) if q else b3
+ticker = st.sidebar.selectbox("Selecione o ticker", res["ticker"])
+start = st.sidebar.date_input("Início", date.today()-timedelta(days=365))
+end = st.sidebar.date_input("Fim", date.today())
 
-# Dates
-col1, col2 = st.sidebar.columns(2)
-default_end = date.today()
-default_start = default_end - timedelta(days=365*2)
-start = col1.date_input("Início", value=default_start)
-end = col2.date_input("Fim", value=default_end)
+st.title("📊 Análise Didática de Ações da B3")
+st.caption("Somente tickers da B3 (.SA) — dados do Yahoo Finance")
 
-st.title("📈 B3 – Análise de Ações (Yahoo Finance)")
-st.caption("Somente tickers da B3 (.SA). Os preços são ajustados por proventos.")
-
-ticker = choice
 if not is_known_b3_ticker(ticker):
-    st.error("Ticker fora da B3. Use apenas códigos .SA.")
+    st.error("Ticker fora da lista da B3.")
     st.stop()
 
-with st.spinner("Baixando histórico..."):
-    df = fetch_history(ticker, start, end)
-
+with st.spinner("Baixando dados..."):
+    df = fetch_data(ticker, start, end)
 if df.empty:
-    st.warning("Não foi possível obter dados para este período.")
+    st.warning("Sem dados disponíveis.")
     st.stop()
 
-dfi = add_indicators(df)
+df = add_indicators(df)
+price = float(df["Close"].iloc[-1])
+sma20 = float(df["SMA20"].iloc[-1])
+rsi_val = float(df["RSI14"].iloc[-1])
+delta20 = (price/sma20-1)*100 if sma20 else np.nan
 
-# Top metrics
-c1, c2, c3, c4 = st.columns(4)
-last_close = float(dfi['Close'].iloc[-1])
-pct_20 = (last_close / float(dfi['SMA20'].iloc[-1]) - 1) * 100 if pd.notna(dfi['SMA20'].iloc[-1]) else np.nan
-pct_50 = (last_close / float(dfi['SMA50'].iloc[-1]) - 1) * 100 if pd.notna(dfi['SMA50'].iloc[-1]) else np.nan
-rsi_last = float(dfi['RSI14'].iloc[-1]) if pd.notna(dfi['RSI14'].iloc[-1]) else np.nan
+c1,c2,c3 = st.columns(3)
 c1.metric("Ticker", ticker)
-c2.metric("Fechamento", f"R$ {last_close:,.2f}".replace(",", "X").replace(".", ",").replace("X","."))
-c3.metric("Δ vs SMA20", f"{pct_20:+.2f}%" if pd.notna(pct_20) else "—")
-c4.metric("RSI(14)", f"{rsi_last:.1f}" if pd.notna(rsi_last) else "—")
+c2.metric("Fechamento", f"R$ {price:,.2f}".replace(",", "X").replace(".", ",").replace("X","."))
+c3.metric("Δ vs SMA20", f"{delta20:+.2f}%")
 
-# Charts
-price_chart(dfi, f"{ticker} • Preço e Médias Móveis")
-rsi_chart(dfi, f"{ticker} • RSI (14)")
+plot_price(df, ticker)
+plot_rsi(df, ticker)
 
-st.info("Dica: você pode colar **PETR4**, **VALE3**, **ITUB4**, etc. Se digitar sem **.SA**, a aplicação adiciona automaticamente.")
+st.info("Dica: você pode colar PETR4, VALE3, ITUB4, etc. Se digitar sem .SA, a aplicação adiciona automaticamente.")
 
-# --- Explicação automática dos indicadores ---
 st.markdown("---")
-st.subheader("📘 Como interpretar estes números")
+st.subheader("🧠 Explicação simples dos resultados")
 
-# Coleta dos dados calculados
-preco = float(dfi['Close'].iloc[-1])
-delta20 = (preco / float(dfi['SMA20'].iloc[-1]) - 1) * 100 if pd.notna(dfi['SMA20'].iloc[-1]) else None
-rsi_val = float(dfi['RSI14'].iloc[-1]) if pd.notna(dfi['RSI14'].iloc[-1]) else None
-
-# Explicação da SMA
 st.markdown(f"""
-**1️⃣ SMA20, SMA50 e SMA200 — Médias Móveis Simples**
+🪜 **1. Entendendo a SMA20 — “a linha da média”**
 
-Essas linhas mostram a **média dos preços de fechamento** de um período:
-- **SMA20:** média dos últimos **20 dias** (curto prazo);
-- **SMA50:** média dos últimos **50 dias** (médio prazo);
-- **SMA200:** média dos últimos **200 dias** (longo prazo).
+A **SMA20** é como a média dos últimos **20 preços de fechamento**.
 
-No caso atual de **{ticker}**, o preço de fechamento foi **R$ {preco:,.2f}**.  
-Ele está **{delta20:+.2f}%** em relação à **SMA20**, o que indica que:
+Ela mostra **a direção geral do preço**:
+- Se o preço está **acima da SMA20**, ele vem **subindo** — está mais forte.
+- Se o preço está **abaixo da SMA20**, ele vem **caindo** — está mais fraco.
+
+👉 No caso de **{ticker}**, o preço atual é **R$ {price:,.2f}**, cerca de **{delta20:+.2f}%** em relação à média dos últimos 20 dias.
 """)
 
-if delta20 is not None:
-    if delta20 < -5:
-        st.markdown("🔴 O preço está **bem abaixo da média** — tendência de baixa de curto prazo.")
-    elif -5 <= delta20 <= 5:
-        st.markdown("🟡 O preço está **próximo da média** — mercado em equilíbrio no curto prazo.")
-    else:
-        st.markdown("🟢 O preço está **acima da média** — tendência de alta no curto prazo.")
+if delta20 < -5:
+    st.markdown("🔴 **A ação vem caindo há várias semanas e o mercado está pessimista no curto prazo.**")
+elif -5 <= delta20 <= 5:
+    st.markdown("🟡 **O preço está próximo da média — o mercado está em equilíbrio.**")
 else:
-    st.markdown("Não foi possível calcular a diferença em relação à SMA20.")
+    st.markdown("🟢 **O preço está acima da média — o papel mostra força no curto prazo.**")
 
-# Explicação do RSI
-st.markdown(f"""
-**2️⃣ RSI(14) — Índice de Força Relativa**
+st.markdown("""
+📉 É como se o preço estivesse “afastado demais da linha média”, o que pode indicar **exagero na queda** — uma corda muito esticada pra baixo.
 
-O RSI mede a **força das últimas altas e quedas**.  
-Ele vai de 0 a 100 e mostra se o ativo está “caro” ou “barato” no curto prazo:
+---
 
-- **Acima de 70:** sobrecompra — pode cair um pouco.  
-- **Entre 30 e 70:** neutro — equilíbrio.  
-- **Abaixo de 30:** sobrevenda — pode reagir pra cima.
+⚖️ **2. Entendendo o RSI(14) — “o termômetro da força”**
 
-O RSI atual de **{ticker}** é **{rsi_val:.1f}**, o que significa:
+O **RSI** vai de 0 a 100 e mostra **quem está dominando**: compradores ou vendedores.
+
+| Faixa | Situação | O que significa |
+|--------|-----------|----------------|
+| 70 a 100 | Sobrecompra | Subiu rápido demais — pode corrigir pra baixo. |
+| 50 | Neutro | Equilíbrio entre compra e venda. |
+| 0 a 30 | Sobrevenda | Caiu rápido demais — pode reagir pra cima. |
 """)
 
-if rsi_val is not None:
-    if rsi_val < 30:
-        st.markdown("🟢 **Sobrevenda** — a ação caiu rápido e pode estar perto de uma reação.")
-    elif 30 <= rsi_val <= 70:
-        st.markdown("🟡 **Neutro** — não há sinal claro de compra ou venda.")
-    else:
-        st.markdown("🔴 **Sobrecompra** — o preço subiu demais, pode haver correção.")
+st.markdown(f"No caso de **{ticker}**, o RSI(14) está em **{rsi_val:.1f}**.")
+
+if rsi_val < 30:
+    st.markdown("🟢 **Está na zona de sobrevenda — o papel caiu muito e pode reagir em breve.**")
+elif 30 <= rsi_val <= 70:
+    st.markdown("🟡 **Está em zona neutra — o mercado está equilibrado.**")
 else:
-    st.markdown("Não foi possível calcular o RSI.")
+    st.markdown("🔴 **Está na zona de sobrecompra — o preço subiu demais e pode corrigir.**")
+
+st.markdown("""
+---
+
+🧩 **3. Juntando as duas informações**
+
+Quando o **preço está bem abaixo da SMA20** e o **RSI está perto de 30**, o mercado parece dizer:
+
+> “Essa ação caiu bastante, está cansada de cair e pode dar um respiro em breve.”
+
+Mas isso **não garante** que vai subir agora — é apenas um **sinal de enfraquecimento da queda**.
+
+---
+
+🔍 **4. Pensando em comportamento de mercado**
+
+Imagine o gráfico assim:
+
+```
+Preço ↓↓↓↓↓
+SMA20 → uma linha que ficou lá em cima
+RSI ↓ até 30
+```
+
+Isso significa:
+- A **queda foi rápida**
+- O **preço ficou longe da média**
+- E o **RSI mostra que os vendedores estão perdendo força**
+
+💡 É o que muitos chamam de **“ponto de atenção”**:
+se aparecer volume de compra nos próximos dias e o preço começar a subir,
+→ pode ser **um repique** (subida temporária após muita queda).
+
+---
+
+💬 **Em resumo:**
+
+| Indicador | O que está dizendo | Significado prático |
+|------------|--------------------|---------------------|
+| **SMA20** | O preço está bem abaixo da média dos últimos 20 dias | A ação caiu rápido; está “pressionada”. |
+| **RSI(14)** | Está quase “no limite da queda” | O mercado pode começar a enxergar oportunidade. |
+| **Conclusão geral** | A ação está fraca, mas pode estar perto de uma pausa ou leve recuperação | — |
+""")
