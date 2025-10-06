@@ -1,1 +1,2 @@
-B3 Didático v6 — textos conversacionais, blocos condicionais e resumo tabular.
+# B3 Ticker App (v4)
+Inclui explicações automáticas de SMA e RSI após a dica, e tratamento robusto do DataFrame do yfinance.
